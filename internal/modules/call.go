@@ -8,7 +8,6 @@ package modules
 
 import (
 	"context"
-	"html"
 
 	"github.com/Laky-64/gologging"
 	"github.com/amarnathcjd/gogram/telegram"
@@ -112,7 +111,7 @@ func streamEndHandler(
 	}
 
 	title := utils.ShortTitle(t.Title, 25)
-	safeTitle := html.EscapeString(title)
+	safeTitle := utils.EscapeHTML(title)
 
 	msgText := F(cid, "stream_now_playing", locales.Arg{
 		"url":      t.URL,
