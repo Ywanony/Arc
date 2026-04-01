@@ -249,7 +249,7 @@ var handlers = []MsgHandlerDef{
 		Filters: []telegram.Filter{superGroupFilter, authFilter},
 	},
 	{
-		Pattern: "position",
+		Pattern: "(pos|position)",
 		Handler: positionHandler,
 		Filters: []telegram.Filter{superGroupFilter},
 	},
@@ -411,7 +411,7 @@ var handlers = []MsgHandlerDef{
 		Filters: []telegram.Filter{superGroupFilter, authFilter},
 	},
 	{
-		Pattern: "cposition",
+		Pattern: "(cpos|cposition)",
 		Handler: cpositionHandler,
 		Filters: []telegram.Filter{superGroupFilter, authFilter},
 	},
@@ -439,6 +439,11 @@ var handlers = []MsgHandlerDef{
 	{
 		Pattern: "playmode",
 		Handler: playmodeHandler,
+		Filters: []telegram.Filter{superGroupFilter, adminFilter},
+	},
+	{
+		Pattern: "(cmddelete|commanddelete)",
+		Handler: cmdDeleteHandler,
 		Filters: []telegram.Filter{superGroupFilter, adminFilter},
 	},
 }
