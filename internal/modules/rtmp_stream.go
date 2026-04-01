@@ -10,7 +10,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"html"
 	"strconv"
 	"strings"
 	"sync"
@@ -200,7 +199,7 @@ func handleStream(m *tg.NewMessage, force bool) error {
 	searchStr := ""
 	if query != "" {
 		searchStr = F(chatID, "searching_query", locales.Arg{
-			"query": html.EscapeString(query),
+			"query": utils.EscapeHTML(query),
 		})
 	} else {
 		searchStr = F(chatID, "searching")
@@ -229,7 +228,7 @@ func handleStream(m *tg.NewMessage, force bool) error {
 
 	// Download track
 	downloadingText := F(chatID, "play_downloading_song", locales.Arg{
-		"title": html.EscapeString(utils.ShortTitle(track.Title, 25)),
+		"title": utils.EscapeHTML(utils.ShortTitle(track.Title, 25)),
 	})
 	replyMsg, _ = utils.EOR(replyMsg, downloadingText)
 
@@ -250,8 +249,8 @@ func handleStream(m *tg.NewMessage, force bool) error {
 			}))
 		} else {
 			utils.EOR(replyMsg, F(chatID, "play_download_failed", locales.Arg{
-				"title": html.EscapeString(utils.ShortTitle(track.Title, 25)),
-				"error": html.EscapeString(err.Error()),
+				"title": utils.EscapeHTML(utils.ShortTitle(track.Title, 25)),
+				"error": utils.EscapeHTML(err.Error()),
 			}))
 		}
 		return tg.ErrEndGroup
@@ -268,7 +267,7 @@ func handleStream(m *tg.NewMessage, force bool) error {
 	}
 
 	// Success message
-	title := html.EscapeString(utils.ShortTitle(track.Title, 25))
+	title := utils.EscapeHTML(utils.ShortTitle(track.Title, 25))
 	msgText := F(chatID, "rtmp_now_streaming", locales.Arg{
 		"url":      track.URL,
 		"title":    title,
