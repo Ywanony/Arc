@@ -66,7 +66,7 @@ bash install.sh && go mod tidy
 3. **Configure Environment**
 ```bash
 cp sample.env .env
-# Edit .env with your credentials
+vi .env # Edit .env with your credentials
 ```
 
 4. **Get Required Credentials**
