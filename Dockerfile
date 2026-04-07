@@ -7,6 +7,7 @@ RUN apt-get update && \
     apt-get install -y \
         git \
         gcc \
+        g++ \
         unzip \
         curl \
         zlib1g-dev && \
