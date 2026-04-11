@@ -137,8 +137,8 @@ func (f *ArcApiPlatform) pollJobStatus(ctx context.Context, jobID string) string
 	apiURL := strings.TrimRight(config.ArcAPIURL, "/")
 	apiKey := config.ArcAPIKey
 
-	retries := 8
-	sleepDuration := 7 * time.Second
+	retries := 15
+	sleepDuration := 3 * time.Second
 
 	reqURL := fmt.Sprintf("%s/youtube/jobStatus", apiURL)
 
