@@ -11,9 +11,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
-	"os"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -22,13 +19,7 @@ import (
 	"github.com/amarnathcjd/gogram/telegram"
 
 	"main/internal/config"
-	"main/internal/core"
 	state "main/internal/core/models"
-	"main/internal/utils"
-)
-
-var telegramDLRegex = regexp.MustCompile(
-	`https:\/\/t\.me\/([a-zA-Z0-9_]{5,})\/(\d+)`,
 )
 
 const PlatformArcApi state.PlatformName = "ArcApi"
@@ -68,50 +59,22 @@ func (f *ArcApiPlatform) Download(
 	statusMsg *telegram.NewMessage,
 ) (string, error) {
 
-	// 0. Check Local Cache First
+	// Check local cache just in case the file was historically downloaded
 	if f := findFile(track); f != "" {
 		gologging.Debug("ArcApi: Download -> Local Cached File -> " + f)
 		return f, nil
 	}
 
-	var pm *telegram.ProgressManager
-	if statusMsg != nil {
-		pm = utils.GetProgress(statusMsg)
-	}
+	gologging.Debug("ArcApi: Fetching direct streaming URL from API V2")
 
-	ext := "mp3"
-	if track.Video {
-		ext = "mp4"
-	}
-	path := getPath(track, "."+ext)
-
-	gologging.Debug("ArcApi: Fetching download URL from API V2")
-
-	// 1. Try V2 API Polling (Optimized Download)
 	dlURL, err := f.v2Download(ctx, track)
 	if err != nil {
-		gologging.ErrorF("ArcApi: V2 Download failed: %v", err)
+		gologging.ErrorF("ArcApi: V2 URL fetch failed: %v", err)
 		return "", err
 	}
 
-	var downloadErr error
-	if telegramDLRegex.MatchString(dlURL) {
-		gologging.DebugF("ArcApi: Downloading via Telegram URL: %s", dlURL)
-		path, downloadErr = f.downloadFromTelegram(ctx, dlURL, path, pm)
-	} else {
-		gologging.DebugF("ArcApi: Downloading via CDN URL: %s", dlURL)
-		downloadErr = f.downloadFromURL(ctx, dlURL, path)
-	}
-
-	if downloadErr != nil {
-		return "", downloadErr
-	}
-	if !fileExists(path) {
-		return "", errors.New("empty file returned by API")
-	}
-
-	gologging.Info(fmt.Sprintf("✅ V2-API | %s | Video: %t", track.ID, track.Video))
-	return path, nil
+	gologging.Info(fmt.Sprintf("✅ V2-API Direct Stream | %s | Video: %t", track.ID, track.Video))
+	return dlURL, nil
 }
 
 func (*ArcApiPlatform) CanSearch() bool { return false }
@@ -120,10 +83,8 @@ func (*ArcApiPlatform) Search(string, bool) ([]*state.Track, error) {
 	return nil, nil
 }
 
-// --- Optimization Core: API V2 ---
-
 func (f *ArcApiPlatform) v2Download(ctx context.Context, track *state.Track) (string, error) {
-	apiURL := config.ArcAPIURL
+	apiURL := strings.TrimRight(config.ArcAPIURL, "/")
 	apiKey := config.ArcAPIKey
 
 	query := track.ID
@@ -131,47 +92,105 @@ func (f *ArcApiPlatform) v2Download(ctx context.Context, track *state.Track) (st
 		query = track.URL
 	}
 
-	for cycle := 0; cycle < 5; cycle++ {
-		reqURL := fmt.Sprintf("%s/youtube/v2/download?api_key=%s&query=%s&isVideo=%t",
-			strings.TrimRight(apiURL, "/"),
-			apiKey,
-			url.QueryEscape(query),
-			track.Video, // Dynamically requests audio or video
-		)
+	reqURL := fmt.Sprintf("%s/youtube/v2/download", apiURL)
 
+	var respData map[string]any
+	resp, err := rc.R().
+		SetContext(ctx).
+		SetQueryParams(map[string]string{
+			"api_key": apiKey,
+			"query":   query,
+			"isVideo": strconv.FormatBool(track.Video),
+		}).
+		SetResult(&respData).
+		Get(reqURL)
+
+	if err != nil {
+		return "", fmt.Errorf("failed to reach api: %w", err)
+	}
+	if resp.IsError() {
+		return "", fmt.Errorf("api returned error status: %d", resp.StatusCode())
+	}
+
+	candidate := f.extractCandidate(respData)
+	if candidate != "" && !strings.Contains(strings.ToLower(candidate), "processing") && !strings.Contains(strings.ToLower(candidate), "queued") {
+		return f.normalizeURL(candidate, apiURL), nil
+	}
+
+	status, _ := respData["status"].(string)
+	if status == "queued" || status == "processing" {
+		jobID := f.extractJobID(respData)
+		if jobID != "" {
+			gologging.DebugF("ArcApi: Polling Job ID: %s", jobID)
+
+			dlURL := f.pollJobStatus(ctx, jobID)
+			if dlURL != "" {
+				return f.normalizeURL(dlURL, apiURL), nil
+			}
+		}
+	}
+
+	return "", errors.New("failed to extract download url or job_id from api")
+}
+
+func (f *ArcApiPlatform) pollJobStatus(ctx context.Context, jobID string) string {
+	apiURL := strings.TrimRight(config.ArcAPIURL, "/")
+	apiKey := config.ArcAPIKey
+
+	retries := 15
+	sleepDuration := 3 * time.Second
+
+	reqURL := fmt.Sprintf("%s/youtube/jobStatus", apiURL)
+
+	for attempt := 0; attempt < retries; attempt++ {
 		var respData map[string]any
 		resp, err := rc.R().
 			SetContext(ctx).
+			SetQueryParams(map[string]string{
+				"api_key": apiKey,
+				"job_id":  jobID,
+			}).
 			SetResult(&respData).
 			Get(reqURL)
 
 		if err != nil || resp.IsError() {
-			time.Sleep(1 * time.Second)
+			time.Sleep(sleepDuration)
 			continue
 		}
 
-		candidate := f.extractCandidate(respData)
-		if candidate == "" || strings.Contains(strings.ToLower(candidate), "processing") || strings.Contains(strings.ToLower(candidate), "queued") {
-			jobID := f.extractJobID(respData)
-			if jobID != "" {
-				gologging.DebugF("ArcApi: Polling Job ID: %s", jobID)
-				candidate = f.pollJobStatus(ctx, jobID)
+		status, _ := respData["status"].(string)
+		if status != "success" {
+			time.Sleep(sleepDuration)
+			continue
+		}
+
+		job, ok := respData["job"].(map[string]any)
+		if !ok {
+			time.Sleep(sleepDuration)
+			continue
+		}
+
+		jobStatus, _ := job["status"].(string)
+		if jobStatus != "done" {
+			time.Sleep(sleepDuration)
+			continue
+		}
+
+		if result, ok := job["result"].(map[string]any); ok {
+			if pubURL, ok := result["public_url"].(string); ok && pubURL != "" {
+				return pubURL
 			}
 		}
 
-		if candidate != "" {
-			return f.normalizeURL(candidate, apiURL), nil
-		}
-		time.Sleep(2 * time.Second)
+		break
 	}
-
-	return "", errors.New("failed to extract download url from api after retries")
+	return ""
 }
 
 func (f *ArcApiPlatform) extractCandidate(data map[string]any) string {
 	if job, ok := data["job"].(map[string]any); ok {
 		if res, ok := job["result"].(map[string]any); ok {
-			for _, k := range []string{"public_url", "cdnurl", "download_url", "url"} {
+			for _, k := range []string{"public_url"} {
 				if v, ok := res[k].(string); ok && strings.TrimSpace(v) != "" {
 					return strings.TrimSpace(v)
 				}
@@ -179,13 +198,13 @@ func (f *ArcApiPlatform) extractCandidate(data map[string]any) string {
 		}
 	}
 	if res, ok := data["result"].(map[string]any); ok {
-		for _, k := range []string{"public_url", "cdnurl", "download_url", "url"} {
+		for _, k := range []string{"public_url"} {
 			if v, ok := res[k].(string); ok && strings.TrimSpace(v) != "" {
 				return strings.TrimSpace(v)
 			}
 		}
 	}
-	for _, k := range []string{"public_url", "cdnurl", "download_url", "url", "tg_link"} {
+	for _, k := range []string{"public_url"} {
 		if v, ok := data[k].(string); ok && strings.TrimSpace(v) != "" {
 			return strings.TrimSpace(v)
 		}
@@ -205,99 +224,12 @@ func (f *ArcApiPlatform) extractJobID(data map[string]any) string {
 	return ""
 }
 
-func (f *ArcApiPlatform) pollJobStatus(ctx context.Context, jobID string) string {
-	apiURL := config.ArcAPIURL
-	apiKey := config.ArcAPIKey
-	interval := 2.0 // seconds
-
-	for attempt := 0; attempt < 10; attempt++ {
-		time.Sleep(time.Duration(interval * float64(time.Second)))
-
-		reqURL := fmt.Sprintf("%s/youtube/jobStatus?api_key=%s&job_id=%s",
-			strings.TrimRight(apiURL, "/"), apiKey, jobID)
-
-		var respData map[string]any
-		resp, err := rc.R().SetContext(ctx).SetResult(&respData).Get(reqURL)
-
-		if err == nil && !resp.IsError() {
-			cand := f.extractCandidate(respData)
-			if cand != "" && !strings.Contains(strings.ToLower(cand), "processing") && !strings.Contains(strings.ToLower(cand), "queued") {
-				return cand
-			}
-		}
-		interval *= 1.2 // Exponential backoff
-	}
-	return ""
-}
-
 func (f *ArcApiPlatform) normalizeURL(candidate, apiURL string) string {
 	if strings.HasPrefix(candidate, "http://") || strings.HasPrefix(candidate, "https://") {
 		return candidate
 	}
 	if strings.HasPrefix(candidate, "/") {
-		return strings.TrimRight(apiURL, "/") + candidate
+		return apiURL + candidate
 	}
-	return strings.TrimRight(apiURL, "/") + "/" + candidate
-}
-
-// --- Standard HTTP & Telegram Downloader Base ---
-
-func (f *ArcApiPlatform) downloadFromURL(
-	ctx context.Context,
-	dlURL, path string,
-) error {
-	resp, err := rc.R().
-		SetContext(ctx).
-		SetOutputFileName(path).
-		Get(dlURL)
-	if err != nil {
-		os.Remove(path)
-		if errors.Is(err, context.Canceled) ||
-			errors.Is(err, context.DeadlineExceeded) {
-			return err
-		}
-		return fmt.Errorf("http download failed: %w", err)
-	}
-
-	if resp.IsError() {
-		return fmt.Errorf("download failed with status: %d", resp.StatusCode())
-	}
-
-	return nil
-}
-
-func (f *ArcApiPlatform) downloadFromTelegram(
-	ctx context.Context,
-	dlURL, path string,
-	pm *telegram.ProgressManager,
-) (string, error) {
-	matches := telegramDLRegex.FindStringSubmatch(dlURL)
-	if len(matches) < 3 {
-		return "", fmt.Errorf("invalid telegram download url: %s", dlURL)
-	}
-
-	username := matches[1]
-	messageID, err := strconv.Atoi(matches[2])
-	if err != nil {
-		return "", fmt.Errorf("invalid message ID: %v", err)
-	}
-
-	msg, err := core.Bot.GetMessageByID(username, int32(messageID))
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch Telegram message: %w", err)
-	}
-
-	dOpts := &telegram.DownloadOptions{
-		FileName: path,
-		Ctx:      ctx,
-	}
-	if pm != nil {
-		dOpts.ProgressManager = pm
-	}
-	_, err = msg.Download(dOpts)
-	if err != nil {
-		os.Remove(path)
-		return "", err
-	}
-	return path, nil
+	return apiURL + "/" + candidate
 }
