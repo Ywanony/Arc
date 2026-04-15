@@ -13,7 +13,7 @@
   <a href="https://go.dev/">
     <img src="https://img.shields.io/badge/Go-1.25-00ADD8?style=for-the-badge&logo=go&labelColor=000000&logoColor=white" alt="Go Version">
   </a>
-  <a href="https://github.com/tusar404/ArcMusic/releases/tag/v1.0.0">
+  <a href="https://github.com/Ywanony/releases/tag/v1.0.0">
     <img src="https://img.shields.io/badge/Version-v1.0.0-FF9800?style=for-the-badge&logo=semver&labelColor=000000&logoColor=white" alt="Version">
   </a>
   <a href="../LICENSE">
