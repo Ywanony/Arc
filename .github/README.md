@@ -22,7 +22,7 @@
   <a href="https://github.com/tusar404/ArcMusic/stargazers">
     <img src="https://img.shields.io/github/stars/tusar404/ArcMusic?style=for-the-badge&label=Stars&labelColor=000000&color=FFD700&logo=github&logoColor=white" alt="GitHub Stars">
   </a>
-  <a href="https://github.com/tusar404/ArcMusic/fork">
+  <a href="https://github.com/Ywanony">
     <img src="https://img.shields.io/github/forks/tusar404/ArcMusic?style=for-the-badge&label=Forks&labelColor=000000&color=00C853&logo=github&logoColor=white" alt="GitHub Forks">
   </a>
 
