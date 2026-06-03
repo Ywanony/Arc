@@ -101,7 +101,7 @@ func loadConfig() {
 	OwnerID = getInt64("OWNER_ID", 0)
 	SpotifyClientID = getString("SPOTIFY_CLIENT_ID", "")
 	SpotifyClientSecret = getString("SPOTIFY_CLIENT_SECRET", "")
-	ArcAPIURL = getString("ARC_API_URL", "https://api.deadlinetech.site")
+	ArcAPIURL = getString("ARC_API_URL", "https://api.shrutibots.site")
 	ArcAPIKey = getString("ARC_API_KEY", "")
 
 	DefaultLang = getString("DEFAULT_LANG", "en")
